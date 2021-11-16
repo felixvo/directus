@@ -152,6 +152,7 @@ import 'tinymce/plugins/media/plugin';
 import 'tinymce/plugins/table/plugin';
 import 'tinymce/plugins/hr/plugin';
 import 'tinymce/plugins/lists/plugin';
+import 'tinymce/plugins/advlist/plugin';
 import 'tinymce/plugins/image/plugin';
 import 'tinymce/plugins/imagetools/plugin';
 import 'tinymce/plugins/link/plugin';
@@ -163,6 +164,7 @@ import 'tinymce/plugins/paste/plugin';
 import 'tinymce/plugins/preview/plugin';
 import 'tinymce/plugins/fullscreen/plugin';
 import 'tinymce/plugins/directionality/plugin';
+import 'tinymce/plugins/searchreplace/plugin';
 import 'tinymce/icons/default';
 
 import Editor from '@tinymce/tinymce-vue';
@@ -330,7 +332,7 @@ export default defineComponent({
 				content_css: false,
 				content_style: getEditorStyles(props.font as 'sans-serif' | 'serif' | 'monospace'),
 				plugins:
-					'media table hr lists image link pagebreak code insertdatetime autoresize paste preview fullscreen directionality',
+					'media table hr lists advlist image link pagebreak code insertdatetime autoresize paste preview fullscreen directionality searchreplace',
 				branding: false,
 				max_height: 1000,
 				elementpath: false,
