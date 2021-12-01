@@ -245,6 +245,7 @@ export default defineComponent({
 
 		const { imageDrawerOpen, imageSelection, closeImageDrawer, onImageSelect, saveImage, imageButton } = useImage(
 			editorRef,
+			isEditorDirty,
 			imageToken
 		);
 
@@ -260,11 +261,14 @@ export default defineComponent({
 			mediaWidth,
 			mediaSource,
 			mediaButton,
-		} = useMedia(editorRef, imageToken);
+		} = useMedia(editorRef, isEditorDirty, imageToken);
 
-		const { linkButton, linkDrawerOpen, closeLinkDrawer, saveLink, linkSelection } = useLink(editorRef);
+		const { linkButton, linkDrawerOpen, closeLinkDrawer, saveLink, linkSelection } = useLink(editorRef, isEditorDirty);
 
-		const { codeDrawerOpen, code, closeCodeDrawer, saveCode, sourceCodeButton } = useSourceCode(editorRef);
+		const { codeDrawerOpen, code, closeCodeDrawer, saveCode, sourceCodeButton } = useSourceCode(
+			editorRef,
+			isEditorDirty
+		);
 
 		const replaceTokens = (value: string, token: string | null) => {
 			const url = getPublicURL();
