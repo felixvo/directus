@@ -198,6 +198,10 @@ fields:
     role: Ρόλος
   directus_settings:
     project_name: Όνομα Έργου
+  directus_shares:
+    name: Όνομα
+    role: Ρόλος
+    password: Κωδικός
   directus_fields:
     note: Σημείωση
     hidden: Κρυφό
@@ -277,6 +281,11 @@ displays:
     collection: Συλλογή
   file:
     file: Αρχείο
+  formatted-value:
+    prefix: Πρόθεμα
+    suffix: Επίθεμα
+    icon: Εικονίδιο
+    text: Κείμενο
   icon:
     icon: Εικονίδιο
   user:
