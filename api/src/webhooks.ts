@@ -44,15 +44,12 @@ function createHandler(webhook: Webhook): ActionHandler {
 	return async (data) => {
 		if (webhook.collections.includes('*') === false && webhook.collections.includes(data.collection) === false) return;
 
-		data['item'] = data['keys'];
-
 		const webhookPayload = pick(data, [
 			'event',
 			'accountability.user',
 			'accountability.role',
 			'collection',
 			'item',
-			'keys', //support both item and keys
 			'action',
 			'payload',
 		]);
