@@ -1,27 +1,26 @@
-import { Knex } from 'knex';
-import { clone, cloneDeep, pick, without, assign } from 'lodash';
-import { getCache } from '../cache';
+import { Accountability, PermissionsAction, Query, SchemaOverview } from '@directus/shared/types';
 import Keyv from 'keyv';
+import { Knex } from 'knex';
+import { assign, clone, cloneDeep, pick, without } from 'lodash';
+import { getCache } from '../cache';
 import getDatabase from '../database';
 import runAST from '../database/run-ast';
 import emitter from '../emitter';
 import env from '../env';
 import { ForbiddenException } from '../exceptions';
 import { translateDatabaseError } from '../exceptions/database/translate';
-import { Accountability, Query, PermissionsAction } from '@directus/shared/types';
 import {
 	AbstractService,
 	AbstractServiceOptions,
 	Action,
 	Item as AnyItem,
-	PrimaryKey,
-	SchemaOverview,
 	MutationOptions,
+	PrimaryKey,
 } from '../types';
 import getASTFromQuery from '../utils/get-ast-from-query';
 import { AuthorizationService } from './authorization';
-import { PayloadService } from './payload';
 import { ActivityService, RevisionsService } from './index';
+import { PayloadService } from './payload';
 
 export type QueryOptions = {
 	stripNonRequested?: boolean;
@@ -99,7 +98,9 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			const payloadAfterHooks =
 				opts?.emitEvents !== false
 					? await emitter.emitFilter(
-							`${this.eventScope}.create`,
+							this.eventScope === 'items'
+								? ['items.create', `${this.collection}.items.create`]
+								: `${this.eventScope}.create`,
 							payload,
 							{
 								collection: this.collection,
@@ -122,12 +123,18 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
 			const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
 
-			// In case of manual string / UUID primary keys, they PK already exists in the object we're saving.
+			// In case of manual string / UUID primary keys, the PK already exists in the object we're saving.
 			let primaryKey = payloadWithTypeCasting[primaryKeyField];
 
 			try {
-				const result = await trx.insert(payloadWithoutAliases).into(this.collection).returning(primaryKeyField);
-				primaryKey = primaryKey ?? result[0];
+				const result = await trx
+					.insert(payloadWithoutAliases)
+					.into(this.collection)
+					.returning(primaryKeyField)
+					.then((result) => result[0]);
+
+				const returnedKey = typeof result === 'object' ? result[primaryKeyField] : result;
+				primaryKey = primaryKey ?? returnedKey;
 			} catch (err: any) {
 				throw await translateDatabaseError(err);
 			}
@@ -195,7 +202,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 
 		if (opts?.emitEvents !== false) {
 			emitter.emitAction(
-				`${this.eventScope}.create`,
+				this.eventScope === 'items' ? ['items.create', `${this.collection}.items.create`] : `${this.eventScope}.create`,
 				{
 					payload,
 					key: primaryKey,
@@ -204,7 +211,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 				{
 					// This hook is called async. If we would pass the transaction here, the hook can be
 					// called after the transaction is done #5460
-					database: getDatabase(),
+					database: this.knex || getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
 				}
@@ -250,12 +257,6 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 	 * Get items by query
 	 */
 	async readByQuery(query: Query, opts?: QueryOptions): Promise<Item[]> {
-		const authorizationService = new AuthorizationService({
-			accountability: this.accountability,
-			knex: this.knex,
-			schema: this.schema,
-		});
-
 		let ast = await getASTFromQuery(this.collection, query, this.schema, {
 			accountability: this.accountability,
 			// By setting the permissions action, you can read items using the permissions for another
@@ -266,6 +267,12 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		});
 
 		if (this.accountability && this.accountability.admin !== true) {
+			const authorizationService = new AuthorizationService({
+				accountability: this.accountability,
+				knex: this.knex,
+				schema: this.schema,
+			});
+
 			ast = await authorizationService.processAST(ast, opts?.permissionsAction);
 		}
 
@@ -274,13 +281,11 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			// GraphQL requires relational keys to be returned regardless
 			stripNonRequested: opts?.stripNonRequested !== undefined ? opts.stripNonRequested : true,
 		});
-
 		if (records === null) {
 			throw new ForbiddenException();
 		}
-
 		const filteredRecords = await emitter.emitFilter(
-			`${this.eventScope}.read`,
+			this.eventScope === 'items' ? ['items.read', `${this.collection}.items.read`] : `${this.eventScope}.read`,
 			records,
 			{
 				query,
@@ -294,19 +299,18 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		);
 
 		emitter.emitAction(
-			`${this.eventScope}.read`,
+			this.eventScope === 'items' ? ['items.read', `${this.collection}.items.read`] : `${this.eventScope}.read`,
 			{
 				payload: filteredRecords,
 				query,
 				collection: this.collection,
 			},
 			{
-				database: getDatabase(),
+				database: this.knex || getDatabase(),
 				schema: this.schema,
 				accountability: this.accountability,
 			}
 		);
-
 		return filteredRecords as Item[];
 	}
 
@@ -336,6 +340,11 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 
 		const filterWithKey = { _and: [{ [primaryKeyField]: { _in: keys } }, query.filter ?? {}] };
 		const queryWithKey = assign({}, query, { filter: filterWithKey });
+
+		// Set query limit as the number of keys
+		if (Array.isArray(keys) && keys.length > 0 && !queryWithKey.limit) {
+			queryWithKey.limit = keys.length;
+		}
 
 		const results = await this.readByQuery(queryWithKey, opts);
 
@@ -381,7 +390,9 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		const payloadAfterHooks =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
-						`${this.eventScope}.update`,
+						this.eventScope === 'items'
+							? ['items.update', `${this.collection}.items.update`]
+							: `${this.eventScope}.update`,
 						payload,
 						{
 							keys,
@@ -394,6 +405,9 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 						}
 				  )
 				: payload;
+
+		// Sort keys to ensure that the order is maintained
+		keys.sort();
 
 		if (this.accountability) {
 			await authorizationService.checkAccess('update', this.collection, keys);
@@ -462,7 +476,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 						schema: this.schema,
 					});
 
-					const revisionIDs = await revisionsService.createMany(
+					const revisions = (
 						await Promise.all(
 							activity.map(async (activity, index) => ({
 								activity: activity,
@@ -473,7 +487,9 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
 							}))
 						)
-					);
+					).filter((revision) => revision.delta);
+
+					const revisionIDs = await revisionsService.createMany(revisions);
 
 					for (let i = 0; i < revisionIDs.length; i++) {
 						const revisionID = revisionIDs[i];
@@ -502,7 +518,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 
 		if (opts?.emitEvents !== false) {
 			emitter.emitAction(
-				`${this.eventScope}.update`,
+				this.eventScope === 'items' ? ['items.update', `${this.collection}.items.update`] : `${this.eventScope}.update`,
 				{
 					payload,
 					keys,
@@ -511,7 +527,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 				{
 					// This hook is called async. If we would pass the transaction here, the hook can be
 					// called after the transaction is done #5460
-					database: getDatabase(),
+					database: this.knex || getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
 				}
@@ -597,6 +613,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 			const authorizationService = new AuthorizationService({
 				accountability: this.accountability,
 				schema: this.schema,
+				knex: this.knex,
 			});
 
 			await authorizationService.checkAccess('delete', this.collection, keys);
@@ -604,7 +621,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 
 		if (opts?.emitEvents !== false) {
 			await emitter.emitFilter(
-				`${this.eventScope}.delete`,
+				this.eventScope === 'items' ? ['items.delete', `${this.collection}.items.delete`] : `${this.eventScope}.delete`,
 				keys,
 				{
 					collection: this.collection,
@@ -645,15 +662,16 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 
 		if (opts?.emitEvents !== false) {
 			emitter.emitAction(
-				`${this.eventScope}.delete`,
+				this.eventScope === 'items' ? ['items.delete', `${this.collection}.items.delete`] : `${this.eventScope}.delete`,
 				{
 					payload: keys,
+					keys: keys,
 					collection: this.collection,
 				},
 				{
 					// This hook is called async. If we would pass the transaction here, the hook can be
 					// called after the transaction is done #5460
-					database: getDatabase(),
+					database: this.knex || getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
 				}
@@ -690,7 +708,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 					continue;
 				}
 
-				defaults[name] = field.defaultValue;
+				if (field.defaultValue) defaults[name] = field.defaultValue;
 			}
 
 			return defaults as Partial<Item>;
